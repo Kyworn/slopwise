@@ -1,7 +1,6 @@
 """LiteLLM wrapper for provider-agnostic LLM access."""
 
 import litellm
-from typing import Optional
 from .config import AgentConfig
 
 

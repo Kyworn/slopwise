@@ -60,12 +60,12 @@ class FunctionAnalyzer:
 
 VERSION A:
 ```c
-{func_a_decompile}
+{func_a}
 ```
 
 VERSION B:
 ```c
-{func_b_decompile}
+{func_b}
 ```
 
 Provide a semantic analysis. Focus on the 'why' (e.g., 'added bounds check', 'optimized loop').

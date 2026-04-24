@@ -1,7 +1,7 @@
 """Function matching and diffing logic with fuzzy matching support."""
 
 import difflib
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -73,7 +73,9 @@ class DiffEngine:
         # 1. Exact matches by name
         common_names = (set(map_a.keys()) & set(map_b.keys())) - matched_names_a
         for name in common_names:
-            if name in matched_names_b: continue
+            if name in matched_names_b: 
+                continue
+            
             fa = map_a[name]
             fb = map_b[name]
             

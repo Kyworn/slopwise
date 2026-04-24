@@ -36,12 +36,12 @@ async def _run_diff(file_a: str, file_b: str, config_path: str, output: str):
         # 1. Decompile
         decompiler = Decompiler(config.ghidra)
         
-        console.print(f"[bold blue]Step 1/5:[/bold blue] Decompiling binaries...")
+        console.print("[bold blue]Step 1/5:[/bold blue] Decompiling binaries...")
         funcs_a = decompiler.decompile(Path(file_a))
         funcs_b = decompiler.decompile(Path(file_b))
         
         # 2. Match & Diff
-        console.print(f"[bold blue]Step 2/5:[/bold blue] Matching functions and computing diff...")
+        console.print("[bold blue]Step 2/5:[/bold blue] Matching functions and computing diff...")
         engine = DiffEngine(config.diff.function_match_threshold)
         diffs = engine.compute_diff(funcs_a, funcs_b)
         
@@ -91,7 +91,7 @@ async def _run_diff(file_a: str, file_b: str, config_path: str, output: str):
         results = await asyncio.gather(*tasks)
         
         # 4. Cluster
-        console.print(f"[bold blue]Step 4/5:[/bold blue] Clustering changes into themes...")
+        console.print("[bold blue]Step 4/5:[/bold blue] Clustering changes into themes...")
         clusters = await clusterer.cluster(results)
         
         # 5. Report

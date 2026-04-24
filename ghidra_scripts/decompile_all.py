@@ -6,12 +6,11 @@
 # @toolbar 
 
 import json
-import sys
 from ghidra.app.decompiler import DecompInterface
 from ghidra.util.task import ConsoleTaskMonitor
 
 def run():
-    program = getCurrentProgram()
+    program = getCurrentProgram()  # noqa: F821
     if not program:
         print("Error: No program loaded")
         return

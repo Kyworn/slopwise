@@ -45,13 +45,15 @@ class Decompiler:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             project_name = "slopwise_proj"
+            out_json = tmp_path / "output.json"
             
             cmd = [
                 str(self.analyze_headless),
                 str(tmp_path),
                 project_name,
                 "-import", str(binary_path),
-                "-postScript", "decompile_all.py",
+                "-postScript", "decompile_all.java",
+                str(out_json), # Argument passed to the Java script
                 "-scriptPath", str(script_path),
                 "-deleteProject",
                 "-noanalysis" # We just want decompilation for now
@@ -62,24 +64,17 @@ class Decompiler:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=False
             )
             
-            return self._parse_output(result.stdout)
-
-    def _parse_output(self, stdout: str) -> List[Dict[str, Any]]:
-        """Extract JSON data from Ghidra stdout."""
-        start_marker = "---SLOPWISE-START---"
-        end_marker = "---SLOPWISE-END---"
-        
-        if start_marker not in stdout or end_marker not in stdout:
-            logger.error("Ghidra script markers not found in output")
-            logger.debug(f"Full stdout: {stdout}")
-            return []
-            
-        try:
-            json_str = stdout.split(start_marker)[1].split(end_marker)[0].strip()
-            return json.loads(json_str)
-        except (IndexError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to parse Ghidra output: {e}")
-            return []
+            if not out_json.exists():
+                logger.error("Ghidra analysis failed, output JSON not created.")
+                logger.debug(f"Ghidra stderr/stdout: {result.stdout}\n{result.stderr}")
+                return []
+                
+            try:
+                with open(out_json, "r") as f:
+                    return json.load(f)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from Ghidra: {e}")
+                return []

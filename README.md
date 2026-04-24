@@ -55,6 +55,8 @@ We ran `slopwise` to diff **cJSON v1.7.14** vs **v1.7.15** (a minor release with
 - **Results:** 49 functions modified
 - **Time:** ~15 minutes (fully local inference)
 
+👉 **[Read the full generated report here!](examples/cjson_1.7.14_vs_1.7.15_report.md)**
+
 **Sample Report Output:**
 ```markdown
 ### Themes Found

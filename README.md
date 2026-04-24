@@ -45,6 +45,32 @@ slopwise diff libfoo_v1.so libfoo_v2.so --config config.yaml -o report.md
 - ✅ **Multi-Agent Orchestration**: Asynchronous orchestration of Analyzer, Critic, and Clusterer agents with concurrency limits (`Semaphore`) to protect API quotas.
 - ✅ **Firmware Extraction Support**: Base structure in place to utilize `binwalk` and `unsquashfs` automatically.
 
+## Real-World Example
+
+We ran `slopwise` to diff **cJSON v1.7.14** vs **v1.7.15** (a minor release with several bug fixes). 
+
+**Execution:**
+- **Targets:** `cjson_v1.7.14.so` vs `cjson_v1.7.15.so`
+- **Model:** Local Qwen 3.6 35B (via Unsloth/llama.cpp)
+- **Results:** 49 functions modified
+- **Time:** ~15 minutes (fully local inference)
+
+**Sample Report Output:**
+```markdown
+### Themes Found
+- **Input Validation and Bounds Checking**: 6 functions affected.
+- **Logic Correction and Bug Fixes**: 11 functions affected.
+- **Memory Management and Allocation**: 18 functions affected.
+
+### Theme: Input Validation and Bounds Checking
+
+#### `parse_number`
+- **Risk**: MEDIUM
+- **Category**: Logic_change
+- **Summary**: The diff shows a modification to the input validation logic within the `parse_number` function, specifically in the character parsing loop. The removal of the input buffer bounds check creates a potential Out-of-Bounds Read vulnerability if the input length is smaller than the number of characters parsed.
+- **Reviewer Notes**: misinterpretation_of_changes, missing_security_implication
+```
+
 ## Roadmap
 
 - Native BinDiff `.gdb` import for pre-computed function matching

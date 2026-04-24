@@ -2,6 +2,7 @@
 
 import litellm
 from typing import Optional
+from .config import AgentConfig
 
 
 class LLMClient:
@@ -11,25 +12,30 @@ class LLMClient:
     Configuration driven via config.yaml provider/model/api_key settings.
     """
 
-    def __init__(
-        self,
-        provider: str,
-        model: str,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-    ):
-        """Initialize LLM client.
+    def __init__(self, config: AgentConfig):
+        """Initialize LLM client from config.
 
         Args:
-            provider: Backend name (e.g., "claude", "openai", "ollama")
-            model: Model identifier (e.g., "claude-3-5-sonnet-20241022")
-            api_key: API key (env var expansion handled by config loader)
-            base_url: Optional custom endpoint (for local/self-hosted inference)
+            config: AgentConfig object containing provider, model, etc.
         """
-        self.provider = provider
-        self.model = model
-        self.api_key = api_key
-        self.base_url = base_url
+        self.provider = config.provider
+        self.model = config.model
+        self.api_key = config.api_key
+        self.base_url = config.base_url
+
+        # Format model string for LiteLLM if provider prefix is missing
+        # e.g., "claude-3..." -> "anthropic/claude-3..."
+        self._model_str = self.model
+        if self.provider and "/" not in self.model:
+            # LiteLLM provider aliases
+            provider_map = {
+                "claude": "anthropic",
+                "openai": "openai",
+                "gemini": "gemini",
+                "ollama": "ollama",
+            }
+            prefix = provider_map.get(self.provider.lower(), self.provider)
+            self._model_str = f"{prefix}/{self.model}"
 
     async def complete(self, messages: list[dict]) -> str:
         """Generate completion from LLM.
@@ -40,4 +46,10 @@ class LLMClient:
         Returns:
             Text response from LLM
         """
-        raise NotImplementedError("LLMClient.complete() pending LiteLLM integration")
+        response = await litellm.acompletion(
+            model=self._model_str,
+            messages=messages,
+            api_key=self.api_key,
+            api_base=self.base_url,
+        )
+        return response.choices[0].message.content

@@ -47,6 +47,25 @@ def test_real_change_not_noise():
     assert not is_rebase_noise(a, b)
 
 
+def test_stack_var_offset_is_noise():
+    a = "int x = auStack_38[0]; pcStack_20 = lStack_18;"
+    b = "int x = auStack_2c[0]; pcStack_14 = lStack_0c;"
+    assert is_rebase_noise(a, b)
+
+
+def test_ghidra_warning_comment_is_noise():
+    a = "// WARNING: Removing unreachable block at 0x001022b4\nreturn 0;"
+    b = "// WARNING: Removing unreachable block at 0x001022a4\nreturn 0;"
+    assert is_rebase_noise(a, b)
+
+
+def test_struct_offsets_preserved():
+    """Small hex literals like 0x10, 0x40 are real struct offsets, not noise."""
+    a = "x = *(long *)(p + 0x10); y = *(long *)(p + 0x40);"
+    b = "x = *(long *)(p + 0x18); y = *(long *)(p + 0x40);"
+    assert not is_rebase_noise(a, b)
+
+
 def test_noise_status_in_diff():
     engine = DiffEngine()
     funcs_a = [{

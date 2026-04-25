@@ -53,25 +53,25 @@ We ran `slopwise` to diff **cJSON v1.7.14** vs **v1.7.15** (a minor release with
 **Execution:**
 - **Targets:** `cjson_v1.7.14.so` vs `cjson_v1.7.15.so`
 - **Model:** Local Qwen 3.6 35B (via Unsloth/llama.cpp)
-- **Results:** 49 functions modified
-- **Time:** ~15 minutes (fully local inference)
+- **Results:** 7 functions analyzed (42 rebase-noise functions filtered out before LLM)
+- **Time:** ~90 seconds (fully local inference)
 
 👉 **[Read the full generated report here!](examples/cjson_1.7.14_vs_1.7.15_report.md)**
 
 **Sample Report Output:**
 ```markdown
 ### Themes Found
-- **Input Validation and Bounds Checking**: 6 functions affected.
-- **Logic Correction and Bug Fixes**: 11 functions affected.
-- **Memory Management and Allocation**: 18 functions affected.
+- **Input Validation & Safety**: 4 functions affected.
+- **Memory Management & Error Handling**: 2 functions affected.
+- **Versioning & Internal Updates**: 1 function affected.
 
-### Theme: Input Validation and Bounds Checking
+### Theme: Input Validation & Safety
 
-#### `parse_number`
+#### `cJSON_CreateFloatArray`
 - **Risk**: MEDIUM
-- **Category**: Logic_change
-- **Summary**: The diff shows a modification to the input validation logic within the `parse_number` function, specifically in the character parsing loop. The removal of the input buffer bounds check creates a potential Out-of-Bounds Read vulnerability if the input length is smaller than the number of characters parsed.
-- **Reviewer Notes**: misinterpretation_of_changes, missing_security_implication
+- **Category**: Bugfix
+- **Summary**: Added null pointer checks before accessing linked list pointers
+  to prevent potential null dereference crashes when creating an empty array.
 ```
 
 ## Roadmap

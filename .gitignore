@@ -41,3 +41,6 @@ config.yaml
 !tests/fixtures/*.bin
 !tests/fixtures/*.so
 !tests/fixtures/*.img
+
+report*.md
+!examples/*.md

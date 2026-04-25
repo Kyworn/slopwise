@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Dict
 
+from slopwise.json_repair import loads_lenient
 from slopwise.llm import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -76,14 +77,31 @@ Respond ONLY with a JSON object in this format:
             {"role": "user", "content": user_prompt}
         ]
 
-        try:
-            response_text = await self.llm_client.complete(messages)
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-            return json.loads(response_text)
-        except Exception as e:
-            logger.error(f"Review failed for {func_name}: {e}")
-            return {"approved": True, "flags": [], "adjusted_analysis": analysis}
+        last_err: Exception | None = None
+        for attempt in range(2):
+            try:
+                response_text = await self.llm_client.complete(messages)
+                return loads_lenient(response_text)
+            except json.JSONDecodeError as e:
+                last_err = e
+                logger.warning(
+                    f"Malformed JSON from critic for {func_name} "
+                    f"(attempt {attempt + 1}/2): {e}"
+                )
+                messages = messages + [
+                    {"role": "assistant", "content": response_text},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON. "
+                            "Reply with ONLY the JSON object, no prose, no "
+                            "markdown fences. Same schema."
+                        ),
+                    },
+                ]
+            except Exception as e:
+                last_err = e
+                break
+
+        logger.error(f"Review failed for {func_name}: {last_err}")
+        return {"approved": True, "flags": [], "adjusted_analysis": analysis}

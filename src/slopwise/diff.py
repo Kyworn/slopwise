@@ -10,19 +10,30 @@ from pydantic import BaseModel
 _FUNC_REF_RE = re.compile(r"func_0x[0-9a-fA-F]+")
 _LABEL_REF_RE = re.compile(r"code_r?0x[0-9a-fA-F]+")
 _ADDR_RE = re.compile(r"\b0x[0-9a-fA-F]{4,}\b")
+# Ghidra-synthesized local vars: auStack_38, pcStack_20, lStack_18, uStack_28...
+# The numeric suffix is a stack offset that shifts whenever the frame layout
+# changes (extra register save, alignment), so it's noise.
+_STACK_VAR_RE = re.compile(r"\b([a-z]{1,4}Stack_)[0-9a-fA-F]+\b")
+# Decompiler comments referencing absolute addresses (unreachable-block warnings,
+# fallthrough notes, etc.) shift on every recompile.
+_GHIDRA_COMMENT_RE = re.compile(r"^.*(WARNING|NOTE|INFO):.*0x[0-9a-fA-F]+.*$", re.MULTILINE)
 
 
 def normalize_decompiled(code: str) -> str:
     """Strip Ghidra address artifacts that shift on every recompile.
 
-    Replaces `func_0xNNNN` call targets, `code_r0xNNNN` jump labels, and
-    bare `0xNNNN` literals (>=4 hex digits) with stable placeholders. Two
-    decompiled bodies that differ only in these artifacts are semantically
-    identical — the byte change is a binary rebase, not a code change.
+    Replaces `func_0xNNNN` call targets, `code_r0xNNNN` jump labels, bare
+    `0xNNNN` literals (>=4 hex digits), Ghidra-synthesized stack-variable
+    suffixes (`auStack_38`, `pcStack_20`, etc.), and decompiler warning
+    comments referencing absolute addresses. Two decompiled bodies that
+    differ only in these artifacts are semantically identical — the byte
+    change is a binary rebase, not a code change.
     """
+    code = _GHIDRA_COMMENT_RE.sub("// GHIDRA_NOTE", code)
     code = _FUNC_REF_RE.sub("FUNC_REF", code)
     code = _LABEL_REF_RE.sub("LABEL_REF", code)
     code = _ADDR_RE.sub("ADDR", code)
+    code = _STACK_VAR_RE.sub(r"\1OFF", code)
     return code
 
 

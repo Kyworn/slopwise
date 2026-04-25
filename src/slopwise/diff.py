@@ -26,7 +26,7 @@ def normalize_decompiled(code: str) -> str:
     `0xNNNN` literals (>=4 hex digits), Ghidra-synthesized stack-variable
     suffixes (`auStack_38`, `pcStack_20`, etc.), and decompiler warning
     comments referencing absolute addresses. Two decompiled bodies that
-    differ only in these artifacts are semantically identical — the byte
+    differ only in these artifacts are semantically identical -- the byte
     change is a binary rebase, not a code change.
     """
     code = _GHIDRA_COMMENT_RE.sub("// GHIDRA_NOTE", code)
@@ -69,7 +69,7 @@ def canonicalize_for_llm(code_a: str, code_b: str) -> tuple[str, str]:
     semantically identical, both bodies reference helpers in the same order
     at the same call sites, so the aliases line up and the rebase noise
     disappears from the diff the LLM sees. When the order diverges, that
-    divergence is the real semantic change — exactly what we want surfaced.
+    divergence is the real semantic change -- exactly what we want surfaced.
 
     Stack-variable suffixes (`auStack_38`) are also normalized; they shift
     on every recompile because of frame-layout drift but rarely carry
@@ -83,7 +83,7 @@ def canonicalize_for_llm(code_a: str, code_b: str) -> tuple[str, str]:
         code = _rewrite_in_order(code, _FUNC_REF_RE, "HELPER")
         code = _rewrite_in_order(code, _LABEL_REF_RE, "LABEL")
         code = _rewrite_in_order(code, _ADDR_RE, "ADDR")
-        # Stack-var suffixes get a single neutral marker — preserving
+        # Stack-var suffixes get a single neutral marker -- preserving
         # ordering would over-segment unrelated locals.
         code = _STACK_VAR_RE.sub(r"\1OFF", code)
         return code

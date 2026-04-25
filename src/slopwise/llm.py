@@ -66,7 +66,7 @@ class LLMClient:
     async def _complete_gemini_cli(self, messages: list[dict]) -> str:
         """Invoke the `gemini` CLI in headless mode.
 
-        Uses Google-account auth — no API key. Prompt is fed via stdin to
+        Uses Google-account auth -- no API key. Prompt is fed via stdin to
         avoid argv length limits on long decompiled functions.
         """
         # Flatten chat messages into a single prompt. The CLI is single-turn,

@@ -1,7 +1,11 @@
+"""Per-function analyzer agent."""
+
 import json
 import logging
-from typing import Dict
 
+from pydantic import ValidationError
+
+from slopwise.agents.schemas import CATEGORIES, RISKS, AnalysisResult
 from slopwise.diff import canonicalize_for_llm
 from slopwise.json_repair import loads_lenient
 from slopwise.llm import LLMClient
@@ -9,122 +13,121 @@ from slopwise.llm import LLMClient
 logger = logging.getLogger(__name__)
 
 
-class FunctionAnalyzer:
-    """Analyze semantic changes in individual functions via LLM.
+SYSTEM_PROMPT = (
+    "You are a senior security researcher and reverse engineer. Your task "
+    "is to analyze the difference between two decompiled C functions and "
+    "explain the semantic meaning of the change.\n"
+    "\n"
+    "RISK CALIBRATION (be strict -- most changes are LOW):\n"
+    "- HIGH:   exploitable bug reachable from untrusted input -- RCE, OOB "
+    "write, auth bypass, leak of sensitive memory.\n"
+    "- MEDIUM: bug with security implications but not directly exploitable "
+    "-- NULL deref reachable from a public API, missing bounds check on a "
+    "buffer that callers may control, logic error that corrupts state.\n"
+    "- LOW:    refactor, version bump, robustness hardening, "
+    "behavior-preserving cleanup, or any change with no plausible security "
+    "impact.\n"
+    "\n"
+    "If unsure between two levels, pick the LOWER one."
+)
 
-    Prompts the LLM to classify each change (bugfix, feature, refactor, security)
-    and provide a human-readable summary and risk assessment.
+
+class FunctionAnalyzer:
+    """Classify and summarize the change between two function versions.
+
+    Output is validated against `AnalysisResult`; on validation failure the
+    LLM is given one chance to retry with the schema error spelled out.
     """
 
-    def __init__(self, llm_client: LLMClient):
-        """Initialize analyzer with LLM backend.
+    MAX_CHARS = 15000  # ~3k tokens per version, well under context limits
 
-        Args:
-            llm_client: Configured LLMClient instance for any provider/model
-        """
+    def __init__(self, llm_client: LLMClient):
         self.llm_client = llm_client
 
     async def analyze(
-        self, 
+        self,
         func_name: str,
-        func_a_decompile: str, 
-        func_b_decompile: str
-    ) -> Dict:
-        """Analyze difference between two function versions.
-
-        Args:
-            func_name: Name of the function being analyzed
-            func_a_decompile: Decompiled pseudocode from version A
-            func_b_decompile: Decompiled pseudocode from version B
-
-        Returns:
-            Dict with keys: category, summary, risk, details
-        """
-        # Point 2: Token Management
-        # Approximate limit of 15000 characters per function version to stay safe
-        MAX_CHARS = 15000
-        
-        def truncate(code):
-            if len(code) > MAX_CHARS:
-                return code[:MAX_CHARS] + "\n/* ... [TRUNCATED DUE TO SIZE] ... */"
-            return code
-
-        # Rename Ghidra address artifacts to stable aliases. When only the
-        # rebase noise differs between versions, the canonicalized bodies
-        # become identical (or nearly so), so the LLM stops latching on
-        # `func_0x00102150 vs func_0x00102140` as evidence of a real change.
+        func_a_decompile: str,
+        func_b_decompile: str,
+    ) -> dict:
+        # Canonicalize Ghidra address artifacts so the model doesn't latch
+        # onto `func_0xNNNN` shifts as evidence of a real change.
         func_a_canon, func_b_canon = canonicalize_for_llm(
             func_a_decompile, func_b_decompile
         )
-        func_a = truncate(func_a_canon)
-        func_b = truncate(func_b_canon)
+        func_a = self._truncate(func_a_canon)
+        func_b = self._truncate(func_b_canon)
 
-        system_prompt = (
-            "You are a senior security researcher and reverse engineer. "
-            "Your task is to analyze changes between two versions of a decompiled C function "
-            "and explain the semantic meaning of these changes."
-        )
-        
-        user_prompt = f"""Analyze the changes in function '{func_name}'.
-
-VERSION A:
-```c
-{func_a}
-```
-
-VERSION B:
-```c
-{func_b}
-```
-
-Provide a semantic analysis. Focus on the 'why' (e.g., 'added bounds check', 'optimized loop').
-Categorize the change as one of: bugfix, feature, refactor, security, or other.
-Assess risk as: low, medium, or high.
-
-Respond ONLY with a JSON object in this format:
-{{
-  "category": "...",
-  "summary": "...",
-  "risk": "...",
-  "details": "..."
-}}"""
-
+        user_prompt = self._build_prompt(func_name, func_a, func_b)
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
         ]
 
         last_err: Exception | None = None
+        response_text = ""
         for attempt in range(2):
             try:
                 response_text = await self.llm_client.complete(messages)
-                return loads_lenient(response_text)
-            except json.JSONDecodeError as e:
+                raw = loads_lenient(response_text)
+                return AnalysisResult.model_validate(raw).model_dump()
+            except (json.JSONDecodeError, ValidationError) as e:
                 last_err = e
                 logger.warning(
-                    f"Malformed JSON from analyzer for {func_name} "
-                    f"(attempt {attempt + 1}/2): {e}"
+                    "Analyzer schema/JSON failure for %s (attempt %d/2): %s",
+                    func_name,
+                    attempt + 1,
+                    e,
                 )
-                # Reinforce the format constraint and retry once.
                 messages = messages + [
                     {"role": "assistant", "content": response_text},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your previous response was not valid JSON. "
-                            "Reply with ONLY the JSON object, no prose, no "
-                            "markdown fences. Same schema."
-                        ),
-                    },
+                    {"role": "user", "content": self._retry_nudge(e)},
                 ]
             except Exception as e:
                 last_err = e
                 break
 
-        logger.error(f"Analysis failed for {func_name}: {last_err}")
-        return {
-            "category": "error",
-            "summary": f"Failed to analyze: {last_err}",
-            "risk": "unknown",
-            "details": "",
-        }
+        logger.error("Analysis failed for %s: %s", func_name, last_err)
+        return AnalysisResult(
+            category="other",
+            risk="low",
+            summary=f"Failed to analyze: {last_err}",
+            details="",
+        ).model_dump()
+
+    @classmethod
+    def _truncate(cls, code: str) -> str:
+        if len(code) > cls.MAX_CHARS:
+            return code[: cls.MAX_CHARS] + "\n/* ... [TRUNCATED] ... */"
+        return code
+
+    @staticmethod
+    def _build_prompt(func_name: str, func_a: str, func_b: str) -> str:
+        cats = ", ".join(CATEGORIES)
+        risks = ", ".join(RISKS)
+        return (
+            f"Analyze the changes in function '{func_name}'.\n\n"
+            "VERSION A:\n```c\n"
+            f"{func_a}\n```\n\n"
+            "VERSION B:\n```c\n"
+            f"{func_b}\n```\n\n"
+            "Focus on the 'why' (e.g., 'added bounds check', "
+            "'removed redundant null check').\n\n"
+            "Respond ONLY with a JSON object, no prose, no markdown fences:\n"
+            "{\n"
+            f'  "category": one of [{cats}],\n'
+            f'  "risk":     one of [{risks}],\n'
+            '  "summary":  one-sentence headline,\n'
+            '  "details":  optional longer explanation (may be empty)\n'
+            "}"
+        )
+
+    @staticmethod
+    def _retry_nudge(err: Exception) -> str:
+        return (
+            "Your previous response did not match the required schema:\n"
+            f"{err}\n\n"
+            "Reply again with ONLY the JSON object. `category` must be one "
+            f"of [{', '.join(CATEGORIES)}]. `risk` must be one of "
+            f"[{', '.join(RISKS)}]. No prose, no markdown fences."
+        )

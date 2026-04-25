@@ -19,7 +19,7 @@ The core pipeline operates in 5 steps:
 
 ## Provider-agnostic
 
-Any LLM backend works: Claude, GPT-4, Gemini, Ollama, vLLM, OpenRouter, or **local inference** (like llama.cpp/unsloth servers). Configure via `config.yaml`—no vendor lock-in. 
+Any LLM backend works: Claude, GPT-4, Gemini, Ollama, vLLM, OpenRouter, or **local inference** (like llama.cpp/unsloth servers). Configure via `config.yaml`--no vendor lock-in. 
 
 ## Status
 
@@ -43,7 +43,10 @@ slopwise diff libfoo_v1.so libfoo_v2.so --config config.yaml -o report.md
 - ✅ **Fuzzy Matching**: Detects function renames using sequence matching on the AST/decompiled code.
 - ✅ **Token Management**: Safely truncates massive functions to prevent LLM context limit exhaustion.
 - ✅ **Multi-Agent Orchestration**: Asynchronous orchestration of Analyzer, Critic, and Clusterer agents with concurrency limits (`Semaphore`) to protect API quotas.
-- ✅ **Rebase Noise Filter**: Detects functions whose only change is shifted Ghidra address artifacts (`func_0xNNNN`, `code_r0xNNNN`, bare `0xNNNN` literals) and skips them before LLM analysis. Recompilation routinely shifts these addresses across the entire binary; sending such diffs to an LLM wastes tokens and produces hallucinated "bugfix" narratives over semantically identical code. On real-world targets this typically eliminates 50–70% of LLM calls.
+- ✅ **Rebase Noise Filter**: Detects functions whose only change is shifted Ghidra address artifacts (`func_0xNNNN`, `code_r0xNNNN`, bare `0xNNNN` literals) and skips them before LLM analysis. Recompilation routinely shifts these addresses across the entire binary; sending such diffs to an LLM wastes tokens and produces hallucinated "bugfix" narratives over semantically identical code. On real-world targets this typically eliminates 50 to 70% of LLM calls.
+- ✅ **Schema-validated Agent Outputs**: Every analyzer/critic/clusterer response is parsed through Pydantic models with strict enums for `category` and `risk`. The LLM gets one retry with the schema error fed back if its first reply doesn't conform. Eliminates category sprawl (`Bugfix/logic`, `Refactor / logic modification`, etc.) and lets the report renderer make consistent assumptions.
+- ✅ **Risk Calibration Rubric**: Analyzer prompt includes an explicit decision tree (HIGH = exploitable from untrusted input, MEDIUM = security-adjacent bug, LOW = refactor/version bump/hardening) plus a "pick the lower one if unsure" tiebreaker. Counters the default-to-MEDIUM hedging that cheap models exhibit on ambiguous diffs.
+- ✅ **Decompile Cache**: Ghidra output is cached at `~/.cache/slopwise/decomp/<sha256>.json`, keyed by the hash of the binary plus the Ghidra script. Re-running the same diff (or iterating on prompts) skips Ghidra entirely on cache hit. `--no-cache` forces a fresh run.
 - ✅ **Firmware Extraction Support**: Base structure in place to utilize `binwalk` and `unsquashfs` automatically.
 
 ## Real-World Example

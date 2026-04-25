@@ -28,13 +28,13 @@ logger = logging.getLogger("slopwise")
 console = Console()
 
 
-async def _run_diff(file_a: str, file_b: str, config_path: str, output: str):
+async def _run_diff(file_a: str, file_b: str, config_path: str, output: str, no_cache: bool = False):
     """Internal async runner for the diff command."""
     try:
         config = load_config(config_path)
-        
+
         # 1. Decompile
-        decompiler = Decompiler(config.ghidra)
+        decompiler = Decompiler(config.ghidra, use_cache=not no_cache)
         
         console.print("[bold blue]Step 1/5:[/bold blue] Decompiling binaries...")
         funcs_a = decompiler.decompile(Path(file_a))
@@ -88,9 +88,14 @@ async def _run_diff(file_a: str, file_b: str, config_path: str, output: str):
                     res
                 )
                 
-                final_res = review["adjusted_analysis"] if not review["approved"] else res
+                # Critic may set approved=false but forget the adjusted
+                # analysis; fall back to the original in that case.
+                if not review.get("approved", True) and review.get("adjusted_analysis"):
+                    final_res = dict(review["adjusted_analysis"])
+                else:
+                    final_res = dict(res)
                 final_res["name"] = d.name
-                final_res["critic_flags"] = review.get("flags", [])
+                final_res["critic_flags"] = review.get("flags", []) or []
                 return final_res
 
         tasks = [analyze_and_review(d) for d in modified]
@@ -122,13 +127,14 @@ def main():
 @click.argument("file_b", type=click.Path(exists=True))
 @click.option("--config", type=click.Path(exists=True), required=True, help="Path to config.yaml")
 @click.option("-o", "--output", type=click.Path(), default="report.md", help="Output report path")
-def diff(file_a: str, file_b: str, config: str, output: str):
+@click.option("--no-cache", is_flag=True, default=False, help="Bypass the decompilation cache")
+def diff(file_a: str, file_b: str, config: str, output: str, no_cache: bool):
     """Analyze semantic differences between two binaries.
 
     FILE_A: Path to original binary
     FILE_B: Path to modified binary
     """
-    asyncio.run(_run_diff(file_a, file_b, config, output))
+    asyncio.run(_run_diff(file_a, file_b, config, output, no_cache=no_cache))
 
 
 if __name__ == "__main__":

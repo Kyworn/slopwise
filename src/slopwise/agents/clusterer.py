@@ -1,79 +1,116 @@
+"""Theme-clustering agent that groups per-function analyses."""
+
 import json
 import logging
-from typing import Dict, List
 
+from pydantic import ValidationError
+
+from slopwise.agents.schemas import ClusterResult
+from slopwise.json_repair import loads_lenient
 from slopwise.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
-class ChangeClusterer:
-    """Group analyzed changes into semantic clusters.
+SYSTEM_PROMPT = (
+    "You are a technical lead overseeing a binary diffing project. Group "
+    "individual function changes into a small number of high-level themes "
+    "to make the report scannable for humans."
+)
 
-    Uses an LLM to identify themes (e.g., "all crypto updates", "all bounds checks")
-    and organize per-function analyses into coherent narrative categories.
-    """
+
+class ChangeClusterer:
+    """Group `AnalysisResult`-shaped dicts into named themes."""
 
     def __init__(self, llm_client: LLMClient):
-        """Initialize clusterer with LLM backend.
-
-        Args:
-            llm_client: Configured LLMClient instance for any provider/model
-        """
         self.llm_client = llm_client
 
-    async def cluster(self, analyses: List[Dict]) -> Dict[str, List[str]]:
-        """Group function analyses by semantic theme.
-
-        Args:
-            analyses: List of analysis dicts from FunctionAnalyzer
-
-        Returns:
-            Dict mapping theme name -> list of function names in that cluster
-        """
+    async def cluster(self, analyses: list[dict]) -> dict[str, list[str]]:
         if not analyses:
             return {}
 
-        system_prompt = (
-            "You are a technical lead overseeing a binary diffing project. "
-            "Your goal is to group individual function changes into high-level 'themes' "
-            "to make the report readable for humans."
-        )
-        
-        # Prepare a condensed list for the prompt to save tokens
         condensed = [
-            {"name": a["name"], "category": a["category"], "summary": a["summary"]}
-            for r in [analyses] for a in r # Handle potential nesting if needed
+            {"name": a["name"], "summary": a.get("summary", "")}
+            for a in analyses
         ]
-        # Actually analyses is already a list of dicts
-        condensed = [{"name": a["name"], "summary": a["summary"]} for a in analyses]
+        names = {a["name"] for a in analyses}
 
-        user_prompt = f"""Below is a list of functions that changed between two versions of a binary, with a brief summary of each change.
-Group these functions into 3 to 7 high-level themes (e.g., 'Memory Management', 'Network Protocol Update', 'Input Validation').
-
-FUNCTIONS:
-{json.dumps(condensed, indent=2)}
-
-Respond ONLY with a JSON object where keys are theme names and values are lists of function names.
-Example:
-{{
-  "Theme Name": ["func1", "func2"],
-  "Another Theme": ["func3"]
-}}"""
+        user_prompt = (
+            "Below is a list of functions that changed between two binary "
+            "versions, with a one-line summary of each change. Group them "
+            "into 3 to 7 themes (e.g., 'Memory Management', 'Input "
+            "Validation', 'Refactor').\n\n"
+            "FUNCTIONS:\n"
+            f"{json.dumps(condensed, indent=2)}\n\n"
+            "Respond ONLY with a JSON object -- no prose, no markdown "
+            "fences. Schema:\n"
+            "{\n"
+            '  "themes": {\n'
+            '    "Theme Name": ["func1", "func2"],\n'
+            '    "Another Theme": ["func3"]\n'
+            "  }\n"
+            "}"
+        )
 
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
         ]
 
-        try:
-            response_text = await self.llm_client.complete(messages)
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-            return json.loads(response_text)
-        except Exception as e:
-            logger.error(f"Clustering failed: {e}")
-            return {"Miscellaneous": [a["name"] for a in analyses]}
+        last_err: Exception | None = None
+        response_text = ""
+        for attempt in range(2):
+            try:
+                response_text = await self.llm_client.complete(messages)
+                raw = loads_lenient(response_text)
+                # Tolerate either {"themes": {...}} (current schema) or a
+                # bare {theme: [...]} mapping returned by older prompts.
+                if "themes" not in raw and all(
+                    isinstance(v, list) for v in raw.values()
+                ):
+                    raw = {"themes": raw}
+                themes = ClusterResult.model_validate(raw).themes
+                return self._ensure_complete(themes, names)
+            except (json.JSONDecodeError, ValidationError) as e:
+                last_err = e
+                logger.warning(
+                    "Clusterer schema/JSON failure (attempt %d/2): %s",
+                    attempt + 1,
+                    e,
+                )
+                messages = messages + [
+                    {"role": "assistant", "content": response_text},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response did not match the "
+                            f"required schema:\n{e}\n\n"
+                            'Reply with ONLY {"themes": {<name>: [<funcs>]}}.'
+                        ),
+                    },
+                ]
+            except Exception as e:
+                last_err = e
+                break
+
+        logger.error("Clustering failed: %s", last_err)
+        return {"Miscellaneous": [a["name"] for a in analyses]}
+
+    @staticmethod
+    def _ensure_complete(
+        themes: dict[str, list[str]], expected: set[str]
+    ) -> dict[str, list[str]]:
+        """Drop unknown names and dump anything the model forgot into a
+        catch-all bucket so every analyzed function appears exactly once
+        in the report."""
+        seen: set[str] = set()
+        cleaned: dict[str, list[str]] = {}
+        for theme, funcs in themes.items():
+            kept = [f for f in funcs if f in expected and f not in seen]
+            if kept:
+                cleaned[theme] = kept
+                seen.update(kept)
+        missing = expected - seen
+        if missing:
+            cleaned.setdefault("Miscellaneous", []).extend(sorted(missing))
+        return cleaned

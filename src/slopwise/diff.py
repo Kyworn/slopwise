@@ -1,9 +1,36 @@
 """Function matching and diffing logic with fuzzy matching support."""
 
 import difflib
+import re
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel
+
+
+_FUNC_REF_RE = re.compile(r"func_0x[0-9a-fA-F]+")
+_LABEL_REF_RE = re.compile(r"code_r?0x[0-9a-fA-F]+")
+_ADDR_RE = re.compile(r"\b0x[0-9a-fA-F]{4,}\b")
+
+
+def normalize_decompiled(code: str) -> str:
+    """Strip Ghidra address artifacts that shift on every recompile.
+
+    Replaces `func_0xNNNN` call targets, `code_r0xNNNN` jump labels, and
+    bare `0xNNNN` literals (>=4 hex digits) with stable placeholders. Two
+    decompiled bodies that differ only in these artifacts are semantically
+    identical — the byte change is a binary rebase, not a code change.
+    """
+    code = _FUNC_REF_RE.sub("FUNC_REF", code)
+    code = _LABEL_REF_RE.sub("LABEL_REF", code)
+    code = _ADDR_RE.sub("ADDR", code)
+    return code
+
+
+def is_rebase_noise(a: str, b: str) -> bool:
+    """True if two decompiled bodies differ only in address artifacts."""
+    if a == b:
+        return False
+    return normalize_decompiled(a) == normalize_decompiled(b)
 
 
 class Function(BaseModel):
@@ -62,7 +89,12 @@ class DiffEngine:
             for name_a, name_b in external_matches.items():
                 if name_a in map_a and name_b in map_b:
                     fa, fb = map_a[name_a], map_b[name_b]
-                    status = "unchanged" if fa.decompiled == fb.decompiled else "modified"
+                    if fa.decompiled == fb.decompiled:
+                        status = "unchanged"
+                    elif is_rebase_noise(fa.decompiled, fb.decompiled):
+                        status = "noise"
+                    else:
+                        status = "modified"
                     diffs.append(FunctionDiff(
                         name=f"{name_a} <-> {name_b}" if name_a != name_b else name_a,
                         func_a=fa, func_b=fb, status=status
@@ -81,9 +113,11 @@ class DiffEngine:
             
             if fa.decompiled == fb.decompiled:
                 status = "unchanged"
+            elif is_rebase_noise(fa.decompiled, fb.decompiled):
+                status = "noise"
             else:
                 status = "modified"
-            
+
             diffs.append(FunctionDiff(name=name, func_a=fa, func_b=fb, status=status))
             matched_names_a.add(name)
             matched_names_b.add(name)

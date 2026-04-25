@@ -1,6 +1,6 @@
 """Tests for the diffing engine."""
 
-from slopwise.diff import DiffEngine
+from slopwise.diff import DiffEngine, is_rebase_noise, normalize_decompiled
 
 
 def test_exact_match():
@@ -32,3 +32,34 @@ def test_modified():
     
     diffs = engine.compute_diff(funcs_a, funcs_b)
     assert diffs[0].status == "modified"
+
+
+def test_rebase_noise_detected():
+    a = "func_0x00102230(x); goto code_r0x00104dee;"
+    b = "func_0x00102220(x); goto code_r0x00104dd7;"
+    assert is_rebase_noise(a, b)
+    assert normalize_decompiled(a) == normalize_decompiled(b)
+
+
+def test_real_change_not_noise():
+    a = "func_0x00102230(x); return 0;"
+    b = "func_0x00102220(x); return 1;"
+    assert not is_rebase_noise(a, b)
+
+
+def test_noise_status_in_diff():
+    engine = DiffEngine()
+    funcs_a = [{
+        "name": "f",
+        "signature": "void f()",
+        "decompiled": "func_0x00102230(x); goto code_r0x00104dee;",
+        "address": "0x100",
+    }]
+    funcs_b = [{
+        "name": "f",
+        "signature": "void f()",
+        "decompiled": "func_0x00102220(x); goto code_r0x00104dd7;",
+        "address": "0x100",
+    }]
+    diffs = engine.compute_diff(funcs_a, funcs_b)
+    assert diffs[0].status == "noise"

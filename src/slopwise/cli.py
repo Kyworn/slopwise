@@ -46,8 +46,14 @@ async def _run_diff(file_a: str, file_b: str, config_path: str, output: str):
         diffs = engine.compute_diff(funcs_a, funcs_b)
         
         modified = [d for d in diffs if d.status == "modified"]
+        noise = [d for d in diffs if d.status == "noise"]
         console.print(f"  Found {len(modified)} modified functions.")
-        
+        if noise:
+            console.print(
+                f"  [dim]Skipped {len(noise)} address-only diffs "
+                f"(binary rebase noise, no LLM cost).[/dim]"
+            )
+
         if not modified:
             console.print("[yellow]No modified functions to analyze.[/yellow]")
             return

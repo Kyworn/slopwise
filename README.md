@@ -23,7 +23,15 @@ Any LLM backend works: Claude, GPT-4, Gemini, Ollama, vLLM, OpenRouter, or **loc
 
 ## Status
 
-**Alpha.** The core multi-agent pipeline is fully functional and tested on real-world libraries (e.g., cJSON) using both cloud providers and local 35B models.
+**Active development, not production-ready.** The core multi-agent pipeline runs end-to-end and has been validated on cJSON 1.7.14 vs 1.7.15 with both Qwen 35B (local llama.cpp) and Gemini 3.1 Flash Lite (via the `gemini` CLI). It has NOT yet been validated on:
+
+- Stripped binaries
+- Non-x86_64 architectures (ARM, MIPS firmware)
+- Large monolithic targets (20k+ functions)
+- CVE patches with known ground truth (recall has not been measured)
+- Real renamed functions (the fuzzy-matching path has only synthetic tests)
+
+Expect rough edges. Bug reports and PRs welcome.
 
 ## Quick start
 

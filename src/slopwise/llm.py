@@ -1,13 +1,20 @@
 """LiteLLM wrapper for provider-agnostic LLM access."""
 
+import asyncio
+import logging
+
 import litellm
 from .config import AgentConfig
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
     """Unified LLM client supporting any backend via LiteLLM.
 
     Supports: Claude, GPT-4, Gemini, Ollama, vLLM, OpenRouter, local inference, etc.
+    Plus a `gemini_cli` provider that shells out to the `gemini` CLI for users
+    on Google account auth (no API key).
     Configuration driven via config.yaml provider/model/api_key settings.
     """
 
@@ -45,6 +52,9 @@ class LLMClient:
         Returns:
             Text response from LLM
         """
+        if self.provider and self.provider.lower() == "gemini_cli":
+            return await self._complete_gemini_cli(messages)
+
         response = await litellm.acompletion(
             model=self._model_str,
             messages=messages,
@@ -52,3 +62,34 @@ class LLMClient:
             api_base=self.base_url,
         )
         return response.choices[0].message.content
+
+    async def _complete_gemini_cli(self, messages: list[dict]) -> str:
+        """Invoke the `gemini` CLI in headless mode.
+
+        Uses Google-account auth — no API key. Prompt is fed via stdin to
+        avoid argv length limits on long decompiled functions.
+        """
+        # Flatten chat messages into a single prompt. The CLI is single-turn,
+        # so we prefix system messages and merge user/assistant turns.
+        parts: list[str] = []
+        for m in messages:
+            role = m.get("role", "user").upper()
+            parts.append(f"[{role}]\n{m['content']}")
+        prompt = "\n\n".join(parts)
+
+        cmd = ["gemini", "-p", prompt, "-o", "text"]
+        if self.model:
+            cmd += ["-m", self.model]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"gemini CLI exited {proc.returncode}: "
+                f"{stderr.decode(errors='replace').strip()}"
+            )
+        return stdout.decode(errors="replace").strip()

@@ -1,0 +1,25 @@
+ghidra:
+  ghidra_home: /opt/ghidra
+
+agents:
+  analyzer:
+    provider: gemini_cli
+    model: gemini-3.1-flash-lite-preview
+
+  clusterer:
+    provider: gemini_cli
+    model: gemini-3.1-flash-lite-preview
+
+  critic:
+    provider: gemini_cli
+    model: gemini-3.1-flash-lite-preview
+
+diff:
+  function_match_threshold: 0.80
+  # gemini CLI spawns a process per call — keep parallelism modest to avoid
+  # hammering the auth/rate-limit layer. Bump if your account allows more.
+  max_parallel_analyses: 4
+
+output:
+  include_unchanged: false
+  risk_threshold: low

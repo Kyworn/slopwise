@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Dict
 
+from slopwise.diff import canonicalize_for_llm
 from slopwise.json_repair import loads_lenient
 from slopwise.llm import LLMClient
 
@@ -48,8 +49,15 @@ class FunctionAnalyzer:
                 return code[:MAX_CHARS] + "\n/* ... [TRUNCATED DUE TO SIZE] ... */"
             return code
 
-        func_a = truncate(func_a_decompile)
-        func_b = truncate(func_b_decompile)
+        # Rename Ghidra address artifacts to stable aliases. When only the
+        # rebase noise differs between versions, the canonicalized bodies
+        # become identical (or nearly so), so the LLM stops latching on
+        # `func_0x00102150 vs func_0x00102140` as evidence of a real change.
+        func_a_canon, func_b_canon = canonicalize_for_llm(
+            func_a_decompile, func_b_decompile
+        )
+        func_a = truncate(func_a_canon)
+        func_b = truncate(func_b_canon)
 
         system_prompt = (
             "You are a senior security researcher and reverse engineer. "

@@ -44,6 +44,53 @@ def is_rebase_noise(a: str, b: str) -> bool:
     return normalize_decompiled(a) == normalize_decompiled(b)
 
 
+def _rewrite_in_order(code: str, pattern: re.Pattern, alias_prefix: str) -> str:
+    """Replace each unique match of `pattern` in `code` with `alias_prefix_N`,
+    where N is the 1-indexed order of first occurrence. Stable per body.
+    """
+    mapping: dict[str, str] = {}
+
+    def repl(m: re.Match) -> str:
+        token = m.group(0)
+        if token not in mapping:
+            mapping[token] = f"{alias_prefix}_{len(mapping) + 1}"
+        return mapping[token]
+
+    return pattern.sub(repl, code)
+
+
+def canonicalize_for_llm(code_a: str, code_b: str) -> tuple[str, str]:
+    """Rename volatile Ghidra artifacts to stable aliases before showing the
+    pair to an LLM.
+
+    `func_0xNNNN`, `code_r0xNNNN`, and bare `0xNNNN` literals get rewritten
+    to `HELPER_N`, `LABEL_N`, `ADDR_N` based on their order of first
+    appearance *within each body independently*. When the two functions are
+    semantically identical, both bodies reference helpers in the same order
+    at the same call sites, so the aliases line up and the rebase noise
+    disappears from the diff the LLM sees. When the order diverges, that
+    divergence is the real semantic change — exactly what we want surfaced.
+
+    Stack-variable suffixes (`auStack_38`) are also normalized; they shift
+    on every recompile because of frame-layout drift but rarely carry
+    meaning at the C level.
+
+    Decompiler comment lines (`WARNING: ... 0xNNNN`) are stripped because
+    they are pure noise.
+    """
+    def one(code: str) -> str:
+        code = _GHIDRA_COMMENT_RE.sub("", code)
+        code = _rewrite_in_order(code, _FUNC_REF_RE, "HELPER")
+        code = _rewrite_in_order(code, _LABEL_REF_RE, "LABEL")
+        code = _rewrite_in_order(code, _ADDR_RE, "ADDR")
+        # Stack-var suffixes get a single neutral marker — preserving
+        # ordering would over-segment unrelated locals.
+        code = _STACK_VAR_RE.sub(r"\1OFF", code)
+        return code
+
+    return one(code_a), one(code_b)
+
+
 class Function(BaseModel):
     """Represents a decompiled function."""
     name: str

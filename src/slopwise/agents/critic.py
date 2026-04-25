@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Dict
 
+from slopwise.diff import canonicalize_for_llm
 from slopwise.json_repair import loads_lenient
 from slopwise.llm import LLMClient
 
@@ -45,6 +46,10 @@ class ChangeCritic:
             "Your job is to double-check the analysis of a code change and ensure it's "
             "accurate, objective, and doesn't miss subtle security implications."
         )
+
+        # Same canonicalization the analyzer used — keeps the critic's view
+        # consistent with what the analyzer was reasoning about.
+        func_a, func_b = canonicalize_for_llm(func_a, func_b)
 
         user_prompt = f"""Review the following analysis of function '{func_name}'.
 

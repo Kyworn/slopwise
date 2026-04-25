@@ -1,6 +1,11 @@
 """Tests for the diffing engine."""
 
-from slopwise.diff import DiffEngine, is_rebase_noise, normalize_decompiled
+from slopwise.diff import (
+    DiffEngine,
+    canonicalize_for_llm,
+    is_rebase_noise,
+    normalize_decompiled,
+)
 
 
 def test_exact_match():
@@ -57,6 +62,32 @@ def test_ghidra_warning_comment_is_noise():
     a = "// WARNING: Removing unreachable block at 0x001022b4\nreturn 0;"
     b = "// WARNING: Removing unreachable block at 0x001022a4\nreturn 0;"
     assert is_rebase_noise(a, b)
+
+
+def test_canonicalize_aligns_shifted_helpers():
+    """Same call order across versions -> identical canonicalization."""
+    a = "func_0x00102150(x); func_0x00102200(y); return func_0x00102150(z);"
+    b = "func_0x00102140(x); func_0x001021f0(y); return func_0x00102140(z);"
+    ca, cb = canonicalize_for_llm(a, b)
+    assert ca == cb
+    assert "HELPER_1" in ca and "HELPER_2" in ca
+    # Same helper used twice -> same alias both times.
+    assert ca.count("HELPER_1") == 2
+
+
+def test_canonicalize_preserves_real_change():
+    """Different call ordering -> divergence survives canonicalization."""
+    a = "func_0x00102150(x); func_0x00102200(y);"
+    b = "func_0x00102140(y); func_0x001021f0(x);"  # args swapped
+    ca, cb = canonicalize_for_llm(a, b)
+    assert ca != cb
+
+
+def test_canonicalize_strips_warning_comments():
+    a = "// WARNING: Removing unreachable block at 0x001022b4\nreturn 0;"
+    b = "return 0;"
+    ca, cb = canonicalize_for_llm(a, b)
+    assert ca.strip() == cb.strip()
 
 
 def test_struct_offsets_preserved():
